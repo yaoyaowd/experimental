@@ -18,10 +18,9 @@ from mrcnn.config import Config
 from mrcnn import model as modellib
 from mrcnn import utils
 
-COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 DATASET_YEAR = '2014' # or '2017'
-DEFAULT_MODEL_DIR = os.path.join(ROOT_DIR, 'model')
-DEFAULT_LOG_DIR = os.path.join(ROOT_DIR, 'logs')
+DEFAULT_MODEL_DIR = os.path.join('/home/dong', 'model')
+DEFAULT_LOG_DIR = os.path.join('/home/dong', 'logs')
 
 class CocoConfig(Config):
     NAME = 'coco'
@@ -29,8 +28,9 @@ class CocoConfig(Config):
     NUM_CLASSES = 1 + 80
 
 class CocoDataset(utils.Dataset):
-    def load_coco(self, dataset_dir, subset, year=DATASET_YEAR, class_ids=None, class_map=None):
-        self.auto_download(dataset_dir, subset, year)
+    def load_coco(self, dataset_dir, subset, year=DATASET_YEAR, class_ids=None, auto_download=False):
+        if auto_download:
+            self.auto_download(dataset_dir, subset, year)
         coco = COCO("{}/annotations/instances_{}{}.json".format(dataset_dir, subset, year))
         if subset == 'minival' or subset == 'valminusminival':
             subset = 'val'
@@ -123,7 +123,7 @@ class CocoDataset(utils.Dataset):
             return super(CocoDataset, self).load_mask(image_id)
         instance_masks = []
         class_ids = []
-        annotations = self.image_info[image_id]["annotation"]
+        annotations = self.image_info[image_id]["annotations"]
         for annotation in annotations:
             class_id = self.map_source_class_id("coco.{}".format(annotation['category_id']))
             if class_id:
@@ -174,9 +174,12 @@ class CocoDataset(utils.Dataset):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('command', metavar='<command>', help='`train` or `evaluation`')
-    parser.add_argument('--dataset', required=True, metavar='/path/to/coco/')
-    parser.add_argument('--model', required=False, default=DEFAULT_MODEL_DIR, metavar='/path/to/weight.h5')
-    parser.add_argument('--logs', required=False, default=DEFAULT_LOG_DIR, metavar='/path/to/logs')
+    parser.add_argument('--dataset', default='/home/dong/coco',
+                        required=False, metavar='/path/to/coco/')
+    parser.add_argument('--model', required=False,
+                        default=DEFAULT_MODEL_DIR, metavar='/path/to/weight.h5')
+    parser.add_argument('--logs', required=False,
+                        default=DEFAULT_LOG_DIR, metavar='/path/to/logs')
     parser.add_argument('--limit', required=False, default=500, help='Images for evaluation')
     args = parser.parse_args()
 
@@ -196,27 +199,23 @@ if __name__ == '__main__':
     if args.command == 'train':
         model = modellib.MaskRCNN(mode="training", config=config, model_dir=args.logs)
 
-"""
-    if args.command == 'train':
         dataset_train = CocoDataset()
-        dataset_train.load_coco(args.dataset, "train", year=DATASET_YEAR)
-        if DATASET_YEAR == '2014':
-            dataset_train.load_coco(args.dataset, "valminusminival", year=DATASET_YEAR)
+        dataset_train.load_coco(args.dataset, "valminusminival", year=DATASET_YEAR)
         dataset_train.prepare()
 
         dataset_val = CocoDataset()
-        val_type = "val" if DATASET_YEAR == '2017' else "minival"
+        val_type = "val" if DATASET_YEAR in '2017' else 'minival'
         dataset_val.load_coco(args.dataset, val_type, year=DATASET_YEAR)
-        dataset_train.prepare()
+        dataset_val.prepare()
 
         augmentation = imgaug.augmenters.Fliplr(0.5)
 
-        # Training - Stage 1
-        print("Training network heads")
-
-        # Training - Stage 2
+        print("Train network heads")
+        model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE,
+                    epochs=40, layers='heads', augmentation=augmentation)
         print("Fine tune Resnet stage 4 and up")
-
-        # Training - Stage 3
+        model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE,
+                    epochs=120, layers='4+', augmentation=augmentation)
         print("Fine tune all layers")
-"""
+        model.train(dataset_train, dataset_val, learning_rate=config.LEARNING_RATE / 10,
+                    epochs=160, layers='all', augmentation=augmentation)
